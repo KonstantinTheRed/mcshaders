@@ -1,0 +1,230 @@
+#version 460
+#extension GL_GOOGLE_include_directive : enable
+
+// ============================================================================
+// rc_trace.comp — Radiance Cascades 3D: Probe Ray Marching via Voxel DDA
+// (MCVR version — traces against a 128^3 occupancy grid SSBO)
+//
+// Dispatch: (probeGridSize, probeGridSize, probeGridSize) workgroups
+// WorkGroup: (8, 8, 1) — loops over direction tiles if dirsPerAxis > 8
+// ============================================================================
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    float playerPosX, playerPosY, playerPosZ;
+    int   cascadeLevel;
+    int   probeGridSize;
+    int   numDirsPerAxis;
+    float intervalStart;
+    float intervalEnd;
+    float probeSpacing;
+    int   frameCount;
+    float skyLightLevel;
+    int   numCascades;
+} pc;
+
+// Cascade atlas (write)
+layout(set = 0, binding = 0, rgba16f) uniform image2D cascadeAtlas;
+
+// Voxel occupancy grid — 128^3, each uint stores:
+//   bits [0..15]  = blockID (0 = air)
+//   bits [16..19] = block light level (0-15)
+//   bit  [20]     = is emissive
+//   bits [21..23] = material category
+layout(set = 0, binding = 1, std430) readonly buffer VoxelGrid {
+    uint voxels[];  // [z * 128*128 + y * 128 + x]
+} voxelGrid;
+
+// Grid origin in world space (set each frame to player position - 64)
+layout(set = 0, binding = 2, std430) readonly buffer VoxelGridInfo {
+    float originX, originY, originZ;
+    float gridScale;  // 1.0 = one voxel per block
+} gridInfo;
+
+#define PI 3.14159265358979323846
+#define EPSILON 1e-6
+#define GRID_SIZE 128
+
+// PCG hash
+uint pcgHash(uint v) {
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float hashToFloat(uint h) {
+    return float(h) * (1.0 / 4294967296.0);
+}
+
+// Voxel grid lookup — returns packed data, 0 if out of bounds or air
+uint getVoxel(ivec3 pos) {
+    if (any(lessThan(pos, ivec3(0))) || any(greaterThanEqual(pos, ivec3(GRID_SIZE))))
+        return 0u;
+    uint idx = uint(pos.z) * uint(GRID_SIZE * GRID_SIZE)
+             + uint(pos.y) * uint(GRID_SIZE)
+             + uint(pos.x);
+    return voxelGrid.voxels[idx];
+}
+
+uint voxelBlockID(uint packed) { return packed & 0xFFFFu; }
+uint voxelLightLevel(uint packed) { return (packed >> 16u) & 0xFu; }
+bool voxelIsEmissive(uint packed) { return (packed & (1u << 20u)) != 0u; }
+uint voxelMaterial(uint packed) { return (packed >> 21u) & 0x7u; }
+
+// Emission color from block light level — warm torch-like
+vec3 emissionColor(uint packed) {
+    float level = float(voxelLightLevel(packed));
+    // Stronger emission with warm color gradient
+    float intensity = (level / 15.0) * (level / 15.0); // quadratic falloff for more contrast
+    return vec3(1.0, 0.75, 0.45) * intensity * 8.0;
+}
+
+// Procedural sky color with proper gradient
+vec3 skyColor(vec3 dir, float skyLight) {
+    float skyFactor = skyLight / 15.0;
+
+    // Horizon to zenith gradient
+    float upDot = dir.y;
+    vec3 zenith = vec3(0.15, 0.3, 0.8);
+    vec3 horizon = vec3(0.5, 0.7, 1.0);
+    vec3 ground = vec3(0.2, 0.18, 0.15);
+
+    vec3 sky;
+    if (upDot > 0.0) {
+        sky = mix(horizon, zenith, upDot);
+        // Sun contribution (simple directional)
+        float sunDot = max(dot(dir, normalize(vec3(0.4, 0.8, 0.3))), 0.0);
+        sky += vec3(1.0, 0.9, 0.7) * pow(sunDot, 64.0) * 4.0;
+        sky += vec3(1.0, 0.95, 0.8) * pow(sunDot, 8.0) * 0.5;
+    } else {
+        // Below horizon — dark ground bounce
+        sky = ground * (1.0 + upDot * 0.5);
+    }
+
+    return sky * skyFactor * 1.5;
+}
+
+// DDA through the voxel grid
+// Returns: vec4(radiance.rgb, hit=1.0 / miss=0.0)
+vec4 traceVoxelDDA(vec3 origin, vec3 dir, float tMin, float tMax) {
+    // Convert world-space origin to grid-space
+    vec3 gridOrigin = vec3(gridInfo.originX, gridInfo.originY, gridInfo.originZ);
+    vec3 localOrigin = (origin - gridOrigin) * gridInfo.gridScale;
+    vec3 startPos = localOrigin + dir * tMin;
+
+    ivec3 mapPos = ivec3(floor(startPos));
+    ivec3 stepDir = ivec3(sign(dir));
+
+    vec3 invDir = vec3(
+        abs(dir.x) > EPSILON ? 1.0 / dir.x : 1e30,
+        abs(dir.y) > EPSILON ? 1.0 / dir.y : 1e30,
+        abs(dir.z) > EPSILON ? 1.0 / dir.z : 1e30
+    );
+
+    vec3 tDelta = abs(invDir);
+    vec3 tNext = vec3(
+        (dir.x > 0.0 ? (float(mapPos.x + 1) - startPos.x) : (startPos.x - float(mapPos.x))) * abs(invDir.x),
+        (dir.y > 0.0 ? (float(mapPos.y + 1) - startPos.y) : (startPos.y - float(mapPos.y))) * abs(invDir.y),
+        (dir.z > 0.0 ? (float(mapPos.z + 1) - startPos.z) : (startPos.z - float(mapPos.z))) * abs(invDir.z)
+    );
+
+    float maxSteps = min((tMax - tMin) * 2.0 + 4.0, 128.0); // cap max steps
+    float t = 0.0;
+
+    for (float i = 0.0; i < maxSteps && t < (tMax - tMin); i += 1.0) {
+        uint packed = getVoxel(mapPos);
+        uint blockID = voxelBlockID(packed);
+
+        if (blockID != 0u) {
+            // Hit a solid block
+            if (voxelIsEmissive(packed)) {
+                return vec4(emissionColor(packed), 1.0);
+            } else {
+                // Non-emissive solid — estimate diffuse bounce from ambient light
+                // Use a neutral block color modulated by ambient light level
+                float ambientLevel = float(voxelLightLevel(packed)) / 15.0;
+                // Approximate diffuse surface color based on material
+                vec3 surfaceColor = vec3(0.6, 0.55, 0.45); // earthy default
+                // Return a modest bounce contribution
+                vec3 bounce = surfaceColor * (ambientLevel * 0.4 + 0.05);
+                return vec4(bounce, 1.0);
+            }
+        }
+
+        // Advance DDA
+        if (tNext.x < tNext.y) {
+            if (tNext.x < tNext.z) {
+                t = tNext.x; mapPos.x += stepDir.x; tNext.x += tDelta.x;
+            } else {
+                t = tNext.z; mapPos.z += stepDir.z; tNext.z += tDelta.z;
+            }
+        } else {
+            if (tNext.y < tNext.z) {
+                t = tNext.y; mapPos.y += stepDir.y; tNext.y += tDelta.y;
+            } else {
+                t = tNext.z; mapPos.z += stepDir.z; tNext.z += tDelta.z;
+            }
+        }
+    }
+
+    return vec4(0.0, 0.0, 0.0, 0.0); // miss
+}
+
+// Direction from octahedral index
+vec3 dirFromOctIndex(ivec2 dirIdx, int dirsPerAxis) {
+    vec2 oct = (vec2(dirIdx) + 0.5) / float(dirsPerAxis) * 2.0 - 1.0;
+    vec3 d = vec3(oct.xy, 1.0 - abs(oct.x) - abs(oct.y));
+    if (d.z < 0.0) {
+        d.xy = (1.0 - abs(d.yx)) * vec2(d.x >= 0.0 ? 1.0 : -1.0,
+                                          d.y >= 0.0 ? 1.0 : -1.0);
+    }
+    return normalize(d);
+}
+
+// Probe world position
+vec3 probeWorldPos(ivec3 probeIdx) {
+    vec3 playerPos = vec3(pc.playerPosX, pc.playerPosY, pc.playerPosZ);
+    vec3 gridOrigin = floor(playerPos / pc.probeSpacing) * pc.probeSpacing
+                    - float(pc.probeGridSize / 2) * pc.probeSpacing;
+    return gridOrigin + (vec3(probeIdx) + 0.5) * pc.probeSpacing;
+}
+
+ivec2 atlasCoord(ivec3 probeIdx, ivec2 dirIdx) {
+    int ax = probeIdx.x * pc.numDirsPerAxis + dirIdx.x;
+    int ay = (probeIdx.z * pc.probeGridSize + probeIdx.y) * pc.numDirsPerAxis + dirIdx.y;
+    return ivec2(ax, ay);
+}
+
+void main() {
+    ivec3 probeIdx = ivec3(gl_WorkGroupID);
+    if (any(greaterThanEqual(probeIdx, ivec3(pc.probeGridSize)))) return;
+
+    for (int tileY = 0; tileY < pc.numDirsPerAxis; tileY += 8) {
+        for (int tileX = 0; tileX < pc.numDirsPerAxis; tileX += 8) {
+            ivec2 dirIdx = ivec2(tileX, tileY) + ivec2(gl_LocalInvocationID.xy);
+            if (any(greaterThanEqual(dirIdx, ivec2(pc.numDirsPerAxis)))) continue;
+
+            vec3 probePos = probeWorldPos(probeIdx);
+            vec3 dir = dirFromOctIndex(dirIdx, pc.numDirsPerAxis);
+
+            // Jitter for temporal stability
+            uint h = pcgHash(uint(probeIdx.x * 1000 + probeIdx.y * 100 + probeIdx.z * 10 +
+                                  dirIdx.x * pc.numDirsPerAxis + dirIdx.y) ^ uint(pc.frameCount));
+            float jitter = hashToFloat(h) * 0.5;
+
+            float tMin = pc.intervalStart + jitter;
+            float tMax = pc.intervalEnd;
+
+            vec4 result = traceVoxelDDA(probePos, dir, tMin, tMax);
+
+            // If highest cascade and miss, fill with sky color
+            if (result.a < 0.5 && pc.cascadeLevel >= pc.numCascades - 1) {
+                result = vec4(skyColor(dir, pc.skyLightLevel), 0.0);
+            }
+
+            ivec2 atlasPos = atlasCoord(probeIdx, dirIdx);
+            imageStore(cascadeAtlas, atlasPos, result);
+        }
+    }
+}

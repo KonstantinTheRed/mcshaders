@@ -1,0 +1,38 @@
+#version 460
+#extension GL_GOOGLE_include_directive : enable
+
+// ============================================================================
+// sharc_update.comp — SHaRC Cache Maintenance
+//
+// Runs once per frame to evict stale entries and decay sample counts.
+// Dispatch: (SHARC_HASH_TABLE_SIZE / 256, 1, 1)
+// ============================================================================
+
+#include "sharc_cache.glsl"
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    uint slot = gl_GlobalInvocationID.x;
+    if (slot >= SHARC_HASH_TABLE_SIZE) return;
+
+    uint key = sharcKeys.keys[slot];
+    if (key == 0u) return;
+
+    uint lastFrame = sharcAge.frameStamps[slot];
+    uint age = uint(frame.frameCount) - lastFrame;
+
+    if (age >= SHARC_MAX_AGE) {
+        // Evict stale entry
+        sharcKeys.keys[slot] = 0u;
+        sharcRadiance.entries[slot] = vec4(0.0);
+        sharcAge.frameStamps[slot] = 0u;
+    } else if (age >= SHARC_STALE_FRAMES) {
+        // Decay sample count to allow new data to blend in faster
+        vec4 entry = sharcRadiance.entries[slot];
+        float decay = 0.9;
+        entry.w *= decay;
+        entry.xyz *= decay;
+        sharcRadiance.entries[slot] = entry;
+    }
+}

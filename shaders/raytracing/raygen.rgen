@@ -1,0 +1,199 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_ray_tracing_position_fetch : enable
+#extension GL_GOOGLE_include_directive : enable
+
+// ============================================================================
+// raygen.rgen — Primary Ray Generation with Shader Execution Reordering (SER)
+//
+// Tier 1 implementation. Uses the hit object API to separate ray traversal
+// from shading, enabling SER to regroup threads by material type for
+// coherent execution.
+//
+// SER pattern:
+//   1. hitObjectTraceRayEXT — trace ray, store hit info without shading
+//   2. reorderThreadWithHitObjectEXT — GPU regroups by material
+//   3. hitObjectExecuteShaderEXT — shade with coherent warps
+//
+// For Minecraft, uses block material category (3 bits) as the SER coherence
+// hint to group stone, water, glass, emissive, leaves, etc.
+// ============================================================================
+
+#include "../include/common.glsl"
+#include "../include/encoding.glsl"
+#include "../include/noise.glsl"
+#include "../include/brdf.glsl"
+
+// Enable SER extensions (multi-vendor preferred, NVIDIA fallback)
+#ifdef GL_EXT_ray_tracing_invocation_reorder
+#extension GL_EXT_ray_tracing_invocation_reorder : enable
+#define SER_AVAILABLE 1
+#elif defined(GL_NV_ray_tracing_invocation_reorder)
+#extension GL_NV_ray_tracing_invocation_reorder : enable
+#define SER_AVAILABLE 1
+#else
+#define SER_AVAILABLE 0
+#endif
+
+// Acceleration structure
+layout(set = 5, binding = 0) uniform accelerationStructureEXT topLevelAS;
+
+// G-Buffer outputs
+layout(set = 5, binding = 1, r32f)    uniform image2D outDepth;
+layout(set = 5, binding = 2, rg16f)   uniform image2D outNormal;
+layout(set = 5, binding = 3, rgba8)   uniform image2D outAlbedo;
+layout(set = 5, binding = 4, r8ui)    uniform uimage2D outMaterial;
+layout(set = 5, binding = 5, rg16f)   uniform image2D outMotion;
+
+// Specular reflection output (noisy, to be denoised)
+layout(set = 5, binding = 6, rgba16f) uniform image2D outSpecular;
+
+// Ray payload — shared with closest-hit and miss shaders
+layout(location = 0) rayPayloadEXT struct RayPayload {
+    vec3  hitPosition;
+    vec3  hitNormal;
+    vec3  albedo;
+    uint  materialCategory;
+    float hitDistance;
+    bool  isMiss;
+} payload;
+
+void main() {
+    ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
+    ivec2 screenSize = ivec2(gl_LaunchSizeEXT.xy);
+    vec2 uv = (vec2(pixel) + 0.5 + frame.jitter.xy) / vec2(screenSize);
+
+    // Compute ray from camera
+    vec4 clipPos = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
+    vec4 viewTarget = frame.invProjMatrix * clipPos;
+    viewTarget /= viewTarget.w;
+    vec3 rayDir = normalize((frame.invViewMatrix * vec4(viewTarget.xyz, 0.0)).xyz);
+    vec3 rayOrigin = frame.cameraPos.xyz;
+
+    float tMin = frame.nearPlane;
+    float tMax = frame.farPlane;
+
+    // ---- Primary ray with SER ----
+#if SER_AVAILABLE
+    // Step 1: Trace ray into hit object (no shading yet)
+    hitObjectNV hitObj;
+    hitObjectTraceRayNV(
+        hitObj,
+        topLevelAS,
+        gl_RayFlagsOpaqueEXT,    // flags
+        0xFF,                     // cull mask
+        0,                        // SBT offset
+        0,                        // SBT stride
+        0,                        // miss index
+        rayOrigin,
+        tMin,
+        rayDir,
+        tMax
+    );
+
+    // Step 2: Reorder threads by material for coherent shading
+    // Use block material category (3 bits, 8 categories) as coherence hint
+    uint coherenceHint = 0u;
+    if (hitObjectIsHitNV(hitObj)) {
+        // Extract material from custom hit attribute or instance data
+        coherenceHint = hitObjectGetInstanceCustomIndexNV(hitObj) & 0x7u;
+    } else {
+        coherenceHint = MAT_SKY;
+    }
+
+    // Reorder with 3-bit hint (8 bins)
+    reorderThreadWithHitObjectNV(hitObj, coherenceHint, 3);
+
+    // Step 3: Execute shading with coherent warps
+    hitObjectExecuteShaderNV(hitObj, 0);
+
+#else
+    // Fallback: standard trace without SER
+    traceRayEXT(
+        topLevelAS,
+        gl_RayFlagsOpaqueEXT,
+        0xFF,
+        0, 0, 0,
+        rayOrigin, tMin,
+        rayDir, tMax,
+        0  // payload location
+    );
+#endif
+
+    // ---- Write G-Buffer ----
+    if (payload.isMiss) {
+        imageStore(outDepth, pixel, vec4(1.0));
+        imageStore(outNormal, pixel, vec4(0.5, 0.5, 0.0, 0.0));
+        imageStore(outAlbedo, pixel, vec4(0.0));
+        imageStore(outMaterial, pixel, uvec4(MAT_SKY));
+        imageStore(outMotion, pixel, vec4(0.0));
+        imageStore(outSpecular, pixel, vec4(0.0));
+        return;
+    }
+
+    // Depth: store as linear distance normalized to [0, 1]
+    float linearDepth = payload.hitDistance / frame.farPlane;
+    imageStore(outDepth, pixel, vec4(linearDepth));
+
+    // Normal: octahedral encoded
+    vec2 encodedNormal = octEncode(payload.hitNormal);
+    imageStore(outNormal, pixel, vec4(encodedNormal, 0.0, 0.0));
+
+    // Albedo
+    imageStore(outAlbedo, pixel, vec4(payload.albedo, 1.0));
+
+    // Material category
+    imageStore(outMaterial, pixel, uvec4(payload.materialCategory));
+
+    // Motion vectors for temporal reuse
+    // Reproject current hit position to previous frame
+    vec3 hitWorld = payload.hitPosition;
+    vec4 prevClip = frame.prevProjMatrix * frame.prevViewMatrix * vec4(hitWorld, 1.0);
+    vec2 prevUV = prevClip.xy / prevClip.w * 0.5 + 0.5;
+    vec2 motion = uv - prevUV;
+    imageStore(outMotion, pixel, vec4(motion, 0.0, 0.0));
+
+    // ---- Specular reflection ray (if surface is reflective) ----
+    float roughness = getBlockRoughness(payload.materialCategory);
+    if (roughness < 0.5 || payload.materialCategory == MAT_WATER ||
+        payload.materialCategory == MAT_GLASS ||
+        payload.materialCategory == MAT_METAL) {
+
+        RNG rng = rngInit(uvec2(pixel), uint(frame.frameCount));
+        vec3 V = -rayDir;
+        vec3 N = payload.hitNormal;
+
+        // Importance sample the GGX distribution
+        vec2 u = rngNext2D(rng);
+        vec3 T, B;
+        buildTangentBasis(N, T, B);
+        vec3 H_tangent = sampleGGX(u, roughness);
+        vec3 H = T * H_tangent.x + B * H_tangent.y + N * H_tangent.z;
+        vec3 reflDir = reflect(-V, H);
+
+        if (dot(reflDir, N) > 0.0) {
+            vec3 reflOrigin = hitWorld + N * 0.01;
+
+            // Trace reflection
+            traceRayEXT(
+                topLevelAS,
+                gl_RayFlagsOpaqueEXT,
+                0xFF,
+                0, 0, 0,
+                reflOrigin, 0.01,
+                reflDir, 256.0,
+                0
+            );
+
+            vec3 specularRadiance = payload.isMiss
+                ? vec3(0.5, 0.7, 1.0) * frame.skyLightLevel / 15.0  // sky
+                : payload.albedo * 0.5; // placeholder, SHaRC will provide real value
+
+            imageStore(outSpecular, pixel, vec4(specularRadiance, roughness));
+        } else {
+            imageStore(outSpecular, pixel, vec4(0.0));
+        }
+    } else {
+        imageStore(outSpecular, pixel, vec4(0.0));
+    }
+}

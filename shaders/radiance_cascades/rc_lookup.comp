@@ -1,0 +1,175 @@
+#version 460
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+
+// ============================================================================
+// rc_lookup.comp — Radiance Cascades 3D: Per-Pixel Irradiance Lookup
+// (MCVR version)
+//
+// Samples cascade 0 probes using nearest-probe lookup and integrates over
+// hemisphere directions with cosine weighting.
+//
+// Dispatch: (screenWidth/8, screenHeight/8, 1)
+// ============================================================================
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    float playerPosX, playerPosY, playerPosZ;
+    int   cascadeLevel;
+    int   probeGridSize;
+    int   numDirsPerAxis;
+    float intervalStart;
+    float intervalEnd;
+    float probeSpacing;
+    int   frameCount;
+    float skyLightLevel;
+    int   numCascades;
+} pc;
+
+// binding 0: cascade 0 atlas (read)
+layout(set = 0, binding = 0, rgba16f) readonly uniform image2D cascadeAtlas;
+
+// binding 1: depth (sampler)
+layout(set = 0, binding = 1) uniform sampler2D gbufDepth;
+
+// binding 2: normals (sampler)
+layout(set = 0, binding = 2) uniform sampler2D gbufNormal;
+
+// binding 3: output irradiance (write)
+layout(set = 0, binding = 3, rgba16f) writeonly uniform image2D outputIrradiance;
+
+// set 1: WorldUBO for inverse VP matrix
+layout(set = 1, binding = 0) uniform WorldUniform {
+    mat4 cameraViewMat;
+    mat4 cameraEffectedViewMat;
+    mat4 cameraProjMat;
+    mat4 cameraViewMatInv;
+    mat4 cameraEffectedViewMatInv;
+    mat4 cameraProjMatInv;
+    vec2 cameraJitter;
+    float gameTime;
+    uint seed;
+    mat4 textureMat;
+    uint overlayTextureID;
+    uint isFirstPerson;
+    float fogStart;
+    float fogEnd;
+    vec4 fogColor;
+    uint fogType;
+    uint skyType;
+    uint rayBounces;
+    float pad3;
+    dvec4 cameraPos;
+    uint endSkyTextureID;
+    uint endPortalTextureID;
+    uint pad4;
+    uint pad5;
+} worldUBO;
+
+#define PI 3.14159265358979323846
+
+// Octahedral decode
+vec3 octDecode(vec2 e) {
+    e = e * 2.0 - 1.0;
+    vec3 n = vec3(e.xy, 1.0 - abs(e.x) - abs(e.y));
+    if (n.z < 0.0) {
+        n.xy = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0,
+                                          n.y >= 0.0 ? 1.0 : -1.0);
+    }
+    return normalize(n);
+}
+
+vec3 dirFromOctIndex(ivec2 dirIdx, int dirsPerAxis) {
+    vec2 oct = (vec2(dirIdx) + 0.5) / float(dirsPerAxis) * 2.0 - 1.0;
+    vec3 d = vec3(oct.xy, 1.0 - abs(oct.x) - abs(oct.y));
+    if (d.z < 0.0) {
+        d.xy = (1.0 - abs(d.yx)) * vec2(d.x >= 0.0 ? 1.0 : -1.0,
+                                          d.y >= 0.0 ? 1.0 : -1.0);
+    }
+    return normalize(d);
+}
+
+ivec2 atlasCoord(ivec3 probeIdx, ivec2 dirIdx) {
+    int ax = probeIdx.x * pc.numDirsPerAxis + dirIdx.x;
+    int ay = (probeIdx.z * pc.probeGridSize + probeIdx.y) * pc.numDirsPerAxis + dirIdx.y;
+    return ivec2(ax, ay);
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 screenSize = imageSize(outputIrradiance);
+    if (any(greaterThanEqual(pixel, screenSize))) return;
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(screenSize);
+
+    float depth = texture(gbufDepth, uv).r;
+    if (depth >= 1.0) {
+        imageStore(outputIrradiance, pixel, vec4(0.0));
+        return;
+    }
+
+    vec3 normal = octDecode(texture(gbufNormal, uv).rg);
+
+    // Reconstruct world-space position from depth
+    vec2 ndc = uv * 2.0 - 1.0;
+    vec4 clipPos = vec4(ndc, depth, 1.0);
+    vec4 viewPos = worldUBO.cameraProjMatInv * clipPos;
+    viewPos /= viewPos.w;
+    vec3 worldPos = (worldUBO.cameraEffectedViewMatInv * viewPos).xyz;
+
+    // Find nearest probe (fast path — avoids 8x trilinear cost)
+    vec3 playerPos = vec3(pc.playerPosX, pc.playerPosY, pc.playerPosZ);
+    vec3 gridOrigin = floor(playerPos / pc.probeSpacing) * pc.probeSpacing
+                    - float(pc.probeGridSize / 2) * pc.probeSpacing;
+    vec3 fracPos = (worldPos - gridOrigin) / pc.probeSpacing;
+    ivec3 nearIdx = clamp(ivec3(round(fracPos - 0.5)), ivec3(0), ivec3(pc.probeGridSize - 1));
+
+    // Also compute second-nearest for lightweight 2-probe blend
+    ivec3 nearIdx2 = clamp(ivec3(floor(fracPos - 0.5)) + 1, ivec3(0), ivec3(pc.probeGridSize - 1));
+    vec3 blendFrac = fract(fracPos - 0.5);
+    // Weight for nearest vs second probe (simple distance-based)
+    float w1 = 1.0;
+    float w2 = 0.0;
+    // Only blend if probes are different
+    if (nearIdx != nearIdx2) {
+        float d1 = length(blendFrac - vec3(0.0));
+        float d2 = length(blendFrac - vec3(1.0));
+        float wSum = 1.0 / max(d1, 0.01) + 1.0 / max(d2, 0.01);
+        w1 = (1.0 / max(d1, 0.01)) / wSum;
+        w2 = (1.0 / max(d2, 0.01)) / wSum;
+    }
+
+    vec3 irradiance = vec3(0.0);
+    float totalWeight = 0.0;
+
+    for (int dy = 0; dy < pc.numDirsPerAxis; dy++) {
+        for (int dx = 0; dx < pc.numDirsPerAxis; dx++) {
+            ivec2 dirIdx = ivec2(dx, dy);
+            vec3 dir = dirFromOctIndex(dirIdx, pc.numDirsPerAxis);
+
+            float cosTheta = dot(dir, normal);
+            if (cosTheta <= 0.0) continue;
+
+            // Sample from nearest probe (fast path)
+            ivec2 atlasPos1 = atlasCoord(nearIdx, dirIdx);
+            vec3 radiance = imageLoad(cascadeAtlas, atlasPos1).rgb * w1;
+
+            if (w2 > 0.01) {
+                ivec2 atlasPos2 = atlasCoord(nearIdx2, dirIdx);
+                radiance += imageLoad(cascadeAtlas, atlasPos2).rgb * w2;
+            }
+
+            float solidAngle = (4.0 * PI) / float(pc.numDirsPerAxis * pc.numDirsPerAxis);
+            irradiance += radiance * cosTheta * solidAngle;
+            totalWeight += cosTheta * solidAngle;
+        }
+    }
+
+    // Normalize by hemisphere integral
+    if (totalWeight > 0.0) {
+        irradiance /= PI;
+    }
+
+    imageStore(outputIrradiance, pixel, vec4(irradiance, 1.0));
+}

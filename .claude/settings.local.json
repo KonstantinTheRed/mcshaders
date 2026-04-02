@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c//**)",
+      "Bash(where glslc:*)",
+      "Bash(where glslangValidator)",
+      "Bash(cp \"d:/Projects/Minecraft Shaders/MCVR/build/src/core/Release/core.dll\" \"d:/Projects/Minecraft Shaders/Radiance/src/main/resources/core.dll\")",
+      "Bash(cp \"d:/Projects/Minecraft Shaders/MCVR/build/src/core/Release/core.pdb\" \"d:/Projects/Minecraft Shaders/Radiance/src/main/resources/core.pdb\")",
+      "Bash(JAVA_HOME=\"c:/Program Files/Java/jdk-21.0.10\" ./gradlew build)",
+      "Bash(cmake --build . --config Release --target shaders)",
+      "Bash(find 'd:/Projects/Minecraft Shaders' -type f -name *.spv -path */restir*)",
+      "Bash(find 'd:/Projects/Minecraft Shaders' -type f -name *.rchit -o -name *rt*.glsl)",
+      "Bash(xargs grep:*)",
+      "Bash(cmake --build build --target shaders)",
+      "Bash(find \"d:/Projects/Minecraft Shaders/MCVR/build/src/shader/shaders/world/ray_tracing\" -name \"*.spv\" -exec ls -la {} \\\\;)",
+      "Bash(find \"d:/Projects/Minecraft Shaders/Radiance/src/main/resources/shaders/world/ray_tracing\" -name \"*.spv\" -exec ls -la {} \\\\;)",
+      "Bash(cmake --build build --target core --config Release)",
+      "Bash(cmake --install build)",
+      "Bash(cp -r \"d:/Projects/Minecraft Shaders/MCVR/build/src/shader/shaders/\"* \"d:/Projects/Minecraft Shaders/Radiance/src/main/resources/shaders/\")",
+      "Bash(JAVA_HOME=\"C:/Program Files/Java/jdk-21.0.10\" ./gradlew clean build -x test)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Konstantin Victoria\\AppData\\Roaming\\ModrinthApp\\profiles\\Fabric 1.21.4\\mods"
+    ]
+  }
+}

@@ -1,0 +1,1433 @@
+{
+  "v": "4.0",
+  "i": "i-1774900000000",
+  "n": "Next-Gen Minecraft Ray Tracing",
+  "d": "Complete knowledge graph for building a state-of-the-art Minecraft shader combining SHaRC Echo Chamber radiance cache with ReSTIR DI, NRD denoising, and FSR upscaling",
+  "canvases": [
+    {
+      "i": "canvas-theory",
+      "n": "Theory",
+      "d": "State-of-the-art ray tracing techniques — what they are, how they work, and why they matter",
+      "nt": [
+        {
+          "i": "t-pillar",
+          "n": "Pillar",
+          "c": "#6366F1"
+        },
+        {
+          "i": "t-technique",
+          "n": "Technique",
+          "c": "#3B82F6"
+        },
+        {
+          "i": "t-paper",
+          "n": "Paper",
+          "c": "#F59E0B"
+        },
+        {
+          "i": "t-concept",
+          "n": "Concept",
+          "c": "#10B981"
+        },
+        {
+          "i": "t-problem",
+          "n": "Problem",
+          "c": "#F43F5E"
+        },
+        {
+          "i": "t-insight",
+          "n": "Insight",
+          "c": "#8B5CF6"
+        }
+      ],
+      "rt": {
+        "Pillar": [
+          "contains",
+          "solves"
+        ],
+        "Technique": [
+          "based on",
+          "improves",
+          "replaces",
+          "paper"
+        ],
+        "Paper": [
+          "introduces",
+          "extends"
+        ],
+        "Concept": [
+          "enables",
+          "relates to"
+        ],
+        "Problem": [
+          "solved by"
+        ]
+      },
+      "nodes": [
+        {
+          "i": "n1",
+          "p": [
+            -30,
+            -200
+          ],
+          "type": "ideaNode",
+          "t": "Insight",
+          "l": "The Core Thesis",
+          "d": "SHaRC as primary GI via persistent radiance cache ('echo chamber' — traceSecondary reads cache, multi-bounce update populates it at 1/25 resolution). ReSTIR DI for importance-sampled emissive block lighting. NRD REBLUR for denoising direct+indirect combined. FSR for temporal upscaling and sharpening. This is what was actually built and is running.",
+          "sn": true,
+          "r": [
+            {
+              "i": "r-th-p1",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p2",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p3",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p4",
+              "n": "contains"
+            }
+          ]
+        },
+        {
+          "i": "n2",
+          "p": [
+            -650,
+            130
+          ],
+          "type": "ideaNode",
+          "t": "Pillar",
+          "l": "Sampling Efficiency",
+          "d": "The first pillar addresses how to choose which light sources to sample and how to reuse samples across pixels and frames. Dominated by the ReSTIR family of algorithms that achieve 6-60x speedup over naive sampling through reservoir-based spatiotemporal importance resampling.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-p1-t1",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p1-t2",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p1-t3",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p1-prob",
+              "n": "solves"
+            }
+          ]
+        },
+        {
+          "i": "n3",
+          "p": [
+            -1150,
+            580
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "ReSTIR DI",
+          "d": "Reservoir-based Spatiotemporal Importance Resampling for Direct Illumination. Uses weighted reservoir sampling to efficiently select important light sources from scenes with millions of lights. Each pixel maintains a reservoir that stores a single light sample, which is refined through temporal reuse (from the previous frame) and spatial reuse (from neighboring pixels). Achieves equal-error 6-60x faster than prior methods.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-rdi-paper",
+              "n": "paper"
+            },
+            {
+              "i": "r-th-rdi-concept",
+              "n": "based on"
+            }
+          ]
+        },
+        {
+          "i": "n4",
+          "p": [
+            -800,
+            700
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "ReSTIR GI",
+          "d": "Extends ReSTIR to global illumination by resampling entire light paths rather than just light sources. Instead of reusing which light was selected, it reuses the full path geometry (hit position, normal, cached radiance at the second vertex). Accepts bias for rough/diffuse surfaces in exchange for massive variance reduction. Used in NVIDIA's Zorah RTX 50 demo.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-rgi-paper",
+              "n": "paper"
+            },
+            {
+              "i": "r-th-rgi-ext",
+              "n": "improves"
+            }
+          ]
+        },
+        {
+          "i": "n5",
+          "p": [
+            -400,
+            700
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "ReSTIR PT / GRIS",
+          "d": "Generalized Resampled Importance Sampling — the mathematical foundation that unifies all ReSTIR variants. ReSTIR PT applies reservoir resampling to full path tracing, enabling reuse of complete light transport paths. This is the most general form: any path can be resampled, shifted, and reconnected. Used in UE5's NvRTX branch for the Zorah demo with all bounces dynamically evaluated in real time.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-rpt-paper",
+              "n": "paper"
+            }
+          ]
+        },
+        {
+          "i": "n6",
+          "p": [
+            -1140,
+            1150
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "MegaLights / RTXDI",
+          "d": "Unreal Engine 5's stochastic direct lighting path built on ReSTIR DI. Enables artists to place orders of magnitude more dynamic and shadowed area lights than previously possible. The RTXDI SDK is the open-source implementation — a production-ready library for integrating ReSTIR DI into any Vulkan or DX12 renderer. Available on GitHub under BSD 3-Clause license.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n7",
+          "p": [
+            -1400,
+            1000
+          ],
+          "type": "ideaNode",
+          "t": "Paper",
+          "l": "Bitterli et al. 2020",
+          "d": "\"Spatiotemporal Reservoir Resampling for Real-Time Ray Tracing with Dynamic Direct Lighting\" — ACM TOG (SIGGRAPH 2020). The foundational ReSTIR paper. Introduces weighted reservoir sampling for light selection, temporal reuse across frames, and spatial reuse across neighboring pixels. Derives an unbiased Monte Carlo estimator for the approach.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n8",
+          "p": [
+            -810,
+            1230
+          ],
+          "type": "ideaNode",
+          "t": "Paper",
+          "l": "Ouyang et al. 2021",
+          "d": "\"ReSTIR GI: Path Resampling for Real-Time Path Tracing\" — Computer Graphics Forum. Extends ReSTIR from direct illumination to global illumination by caching radiance at secondary vertices and resampling full paths.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n9",
+          "p": [
+            -390,
+            1200
+          ],
+          "type": "ideaNode",
+          "t": "Paper",
+          "l": "Lin et al. 2022",
+          "d": "\"Generalized Resampled Importance Sampling: Foundations of ReSTIR\" — ACM TOG. Provides the unified mathematical framework for all ReSTIR variants, enabling path-space resampling with shift mappings.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n10",
+          "p": [
+            -1400,
+            500
+          ],
+          "type": "ideaNode",
+          "t": "Concept",
+          "l": "Reservoir Sampling",
+          "d": "A family of algorithms for randomly selecting k items from a stream of unknown length in a single pass using O(k) memory. In ReSTIR, each pixel maintains a reservoir with a single sample (k=1), and samples are weighted by their contribution. The key insight is that reservoirs can be combined: two reservoirs can be merged in O(1) time while preserving the statistical properties, enabling spatial and temporal reuse.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n11",
+          "p": [
+            -1000,
+            30
+          ],
+          "type": "ideaNode",
+          "t": "Problem",
+          "l": "Many-Light Problem",
+          "d": "In Minecraft, players place thousands of emissive blocks (torches, glowstone, lava, redstone lamps). Traditional path tracing picks one light randomly per sample — with 1000 nearby emitters, each sample only captures 0.1% of the lighting information, producing extreme noise. ReSTIR solves this by intelligently selecting the most important lights through reservoir resampling.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-prob-solve",
+              "n": "solved by"
+            }
+          ]
+        },
+        {
+          "i": "n12",
+          "p": [
+            310,
+            240
+          ],
+          "type": "ideaNode",
+          "t": "Pillar",
+          "l": "Radiance Caching",
+          "d": "The second pillar caches computed radiance values for reuse, avoiding redundant path tracing. Ranges from traditional spatial hash caches (SHaRC) to neural network-based approaches (NRC) that train a tiny MLP on-the-fly to predict radiance at any point in the scene.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-p2-t1",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p2-t2",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p2-t3",
+              "n": "contains"
+            }
+          ]
+        },
+        {
+          "i": "n13",
+          "p": [
+            -10,
+            550
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "Neural Radiance Cache (NRC)",
+          "d": "Uses a fully-fused tiny multi-layer perceptron (MLP) trained on-the-fly during rendering to predict outgoing radiance at any scene point. The network uses multiresolution hash encoding for position input. Path tracer traces short paths and terminates into the cache for the remaining bounces. Each cache query takes 2-25x less compute than a full path tracing sample. Requires Tensor Cores (NVIDIA RTX 20+). Open source via RTXGI 2.0 SDK.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-nrc-paper",
+              "n": "paper"
+            }
+          ]
+        },
+        {
+          "i": "n14",
+          "p": [
+            500,
+            650
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "SHaRC",
+          "d": "Spatially Hashed Radiance Cache — a world-space radiance cache built on a spatial hash data structure. Works on ANY DirectX or Vulkan ray tracing GPU (no Tensor Cores required). Provides a fast, scalable global illumination technique for path tracing by storing and accumulating radiance at hash grid positions. Distributed as shader-only sources on GitHub (MIT license). The hardware-agnostic alternative to NRC.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n15",
+          "p": [
+            210,
+            1160
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "Neural Incident Radiance Cache (NIRC)",
+          "d": "An advancement over NRC from Eurographics 2025. Stores incoming (incident) radiance instead of outgoing, enabling direct cache invocation at the primary surface without tracing additional rays. When many directional samples are taken, each NIRC query is 5-10x cheaper than NRC. Combined with Two-Level Monte Carlo for unbiased results.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-nirc-imp",
+              "n": "improves"
+            }
+          ]
+        },
+        {
+          "i": "n16",
+          "p": [
+            -120,
+            1120
+          ],
+          "type": "ideaNode",
+          "t": "Paper",
+          "l": "Müller et al. 2021",
+          "d": "\"Real-time Neural Radiance Caching for Path Tracing\" — ACM TOG (SIGGRAPH 2021). Introduces the concept of terminating path tracing early and querying a neural network cache for remaining light transport. Uses fully-fused tiny neural networks with multiresolution hash encoding.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n17",
+          "p": [
+            930,
+            90
+          ],
+          "type": "ideaNode",
+          "t": "Pillar",
+          "l": "Structured GI (Radiance Cascades)",
+          "d": "The third pillar — and the key innovation for Minecraft. Radiance Cascades decomposes the radiance field into hierarchical cascade levels, producing noise-free global illumination at a cost independent of scene complexity. Created by Alexander Sannikov (Grinding Gear Games / Path of Exile). The technique exploits a fundamental property of penumbra: you need high spatial resolution near light sources and high angular resolution far from them.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-p3-t1",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p3-t2",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p3-insight",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p3-prob",
+              "n": "solves"
+            }
+          ]
+        },
+        {
+          "i": "n18",
+          "p": [
+            800,
+            700
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "Radiance Cascades 2D",
+          "d": "The foundational technique proven in 2D (flatland). Each cascade level has probes arranged in a grid. Cascade 0 has many probes with few ray directions (high spatial, low angular resolution). Each successive cascade halves the probe count and doubles the ray count. All cascades use equal memory. Merging cascades from top to bottom propagates far-field radiance into near-field probes via bilinear interpolation. The result is noise-free — no denoiser needed.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-rc-paper",
+              "n": "paper"
+            }
+          ]
+        },
+        {
+          "i": "n19",
+          "p": [
+            1290,
+            810
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "Radiance Cascades 3D",
+          "d": "The 3D extension of Radiance Cascades — active research (2024-present). Angular dimension expands from a circle to a sphere. Probe grids become 3D volumes. The cascade merge requires trilinear interpolation across 8 neighboring probes from the upper cascade (vs 4 in 2D). Alexander Sannikov has a 3D Shadertoy demo (shadertoy.com/view/X3XfRM) with multi-bounce lighting and BRDF integration. A Vulkan implementation exists on GitHub (JTLee98/RadianceCascadesVK3D). No one has yet applied this to Minecraft.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n20",
+          "p": [
+            1080,
+            1200
+          ],
+          "type": "ideaNode",
+          "t": "Insight",
+          "l": "Why RC + Minecraft = Perfect Match",
+          "d": "Four properties make RC ideal for Minecraft: (1) No denoiser needed — saves 3-5ms/frame. (2) Scene-independent cost — 2 or 10,000 light sources cost the same. (3) Minecraft IS a voxel grid — DDA ray stepping is exact and cache-friendly, the ideal traversal for RC probes. (4) Constant memory — total memory = 2x cascade 0, scales to infinite worlds. This combination has not been implemented in any Minecraft shader pack as of 2026.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n21",
+          "p": [
+            810,
+            1210
+          ],
+          "type": "ideaNode",
+          "t": "Paper",
+          "l": "Sannikov 2023",
+          "d": "\"A Novel Approach to Calculating Global Illumination\" — Journal of Computer Graphics Techniques. Alexander Sannikov's foundational paper on Radiance Cascades. Demonstrates that the cascades encode radiance at a constant cost independent of scene complexity, number of light sources, or polygons. Calculates lighting for 2, 102, and 1002 particles in the same 12ms.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n22",
+          "p": [
+            1270,
+            160
+          ],
+          "type": "ideaNode",
+          "t": "Problem",
+          "l": "Denoiser Dependency",
+          "d": "Every current Minecraft path tracer (Continuum RT, SEUS PTGI, Dirt RT, MollyVX) traces ~1 sample per pixel and runs expensive SVGF/A-SVGF denoisers consuming 3-5ms per frame. Denoisers introduce ghosting, temporal lag, and overblurring — especially visible when placing/breaking blocks or moving quickly. Radiance Cascades eliminates this dependency for the diffuse channel entirely.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-prob2-solve",
+              "n": "solved by"
+            }
+          ]
+        },
+        {
+          "i": "n23",
+          "p": [
+            1800,
+            400
+          ],
+          "type": "ideaNode",
+          "t": "Pillar",
+          "l": "GPU Coherence & Neural Rendering",
+          "d": "The fourth pillar addresses hardware-level efficiency. Shader Execution Reordering (SER) fixes the fundamental divergence problem in ray tracing. Opacity Micromaps (OMMs) eliminate costly any-hit shaders. Neural Texture Compression (NTC) reduces VRAM by 8x. These are 'free performance' — they improve throughput without changing the algorithm.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-p4-t1",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p4-t2",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p4-t3",
+              "n": "contains"
+            },
+            {
+              "i": "r-th-p4-t4",
+              "n": "contains"
+            }
+          ]
+        },
+        {
+          "i": "n24",
+          "p": [
+            1640,
+            890
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "Shader Execution Reordering (SER)",
+          "d": "Reorders GPU threads on-the-fly so that rays hitting similar materials are grouped together for coherent execution. In Minecraft, rays hit wildly different block types (stone, water, glass, lava) causing massive warp divergence. SER regroups threads after traversal but before shading. Achieved 24% speedup in Indiana Jones (MachineGames) and 39% combined with OMMs in Alan Wake 2 (Remedy). Now a multi-vendor Vulkan extension (VK_EXT_ray_tracing_invocation_reorder). Efficiency doubled in RTX 50 series.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n25",
+          "p": [
+            1930,
+            960
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "Opacity Micromaps (OMMs)",
+          "d": "Pre-encode the opacity of alpha-tested geometry (leaves, tall grass, vines, glass panes) at the micro-triangle level so the RT hardware can resolve transparency without invoking any-hit shaders. Delivered up to 2.3x performance improvement in path-traced games. In Indiana Jones, OMMs produced a 55% reduction in GPU time for vegetation-heavy path tracing passes. Now standardized in DXR 1.2 / Shader Model 6.9.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n26",
+          "p": [
+            2210,
+            870
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "Neural Texture Compression (NTC)",
+          "d": "Uses a tiny MLP decoder to decompress textures in real-time during shading. Compresses PBR texture bundles (albedo + normal + specular + emissive) by up to 8x compared to traditional block compression. A 32MB PBR material compresses to 1.52MB with no quality loss. Requires Cooperative Vectors (Vulkan VK_NV_cooperative_vector) for real-time inference, or can decompress at load time (\"Inference on Load\") for GPUs without tensor cores. Open source on GitHub (NVIDIA-RTX/RTXNTC).",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n27",
+          "p": [
+            2440,
+            730
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "DLSS Ray Reconstruction",
+          "d": "Replaces the entire hand-tuned denoiser stack with a single AI network trained on NVIDIA's supercomputers. Understands spatial and temporal relationships between ray-traced effects (reflections, caustics, GI) and makes context-aware decisions about detail preservation. Trained on 5x more data than DLSS 3. Works on all RTX GPUs. In our pipeline, this becomes less critical because Radiance Cascades already produces noise-free diffuse — but it remains valuable for specular reconstruction.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n28",
+          "p": [
+            1800,
+            200
+          ],
+          "type": "ideaNode",
+          "t": "Problem",
+          "l": "Warp Divergence",
+          "d": "When rays from the same warp (32 threads) hit different materials, the GPU must serialize execution — running each material's shader sequentially while other threads idle. In Minecraft, a single warp might hit stone, water, glass, leaves, lava, and air simultaneously. Without SER, utilization can drop below 30%. SER solves this by regrouping threads by material type before shading.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-th-prob3-solve",
+              "n": "solved by"
+            }
+          ]
+        },
+        {
+          "i": "n29",
+          "p": [
+            1560,
+            1310
+          ],
+          "type": "ideaNode",
+          "t": "Concept",
+          "l": "Voxel DDA Traversal",
+          "d": "Digital Differential Analyzer — an exact integer-stepping algorithm for traversing regular grids. Each step advances the ray to the next voxel boundary along whichever axis is closest. For Minecraft's block grid, this means zero approximation error, no BVH construction overhead, and excellent cache locality (nearby probes access nearby voxels). DDA is the ideal ray traversal for Radiance Cascades probes in a voxel world.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n30",
+          "p": [
+            600,
+            1200
+          ],
+          "type": "ideaNode",
+          "t": "Technique",
+          "l": "Volumetric ReSTIR",
+          "d": "Applies ReSTIR sampling to participating media (fog, haze, underwater). Instead of sampling lights at surface hits, it samples light contributions through volume segments. NVIDIA's RTX Volumetrics uses a volume-based ReSTIR algorithm to create high-contrast volumetric light and shadows. Critical for Minecraft's caves, Nether fog, and underwater environments.",
+          "sn": false,
+          "r": []
+        }
+      ],
+      "edges": [
+        {
+          "i": "e1",
+          "s": "n1",
+          "g": "n2",
+          "h": "r-th-p1"
+        },
+        {
+          "i": "e2",
+          "s": "n1",
+          "g": "n12",
+          "h": "r-th-p2"
+        },
+        {
+          "i": "e3",
+          "s": "n1",
+          "g": "n17",
+          "h": "r-th-p3"
+        },
+        {
+          "i": "e4",
+          "s": "n1",
+          "g": "n23",
+          "h": "r-th-p4"
+        },
+        {
+          "i": "e5",
+          "s": "n2",
+          "g": "n3",
+          "h": "r-th-p1-t1"
+        },
+        {
+          "i": "e6",
+          "s": "n2",
+          "g": "n4",
+          "h": "r-th-p1-t2"
+        },
+        {
+          "i": "e7",
+          "s": "n2",
+          "g": "n5",
+          "h": "r-th-p1-t3"
+        },
+        {
+          "i": "e8",
+          "s": "n2",
+          "g": "n11",
+          "h": "r-th-p1-prob"
+        },
+        {
+          "i": "e9",
+          "s": "n3",
+          "g": "n7",
+          "h": "r-th-rdi-paper"
+        },
+        {
+          "i": "e10",
+          "s": "n3",
+          "g": "n10",
+          "h": "r-th-rdi-concept"
+        },
+        {
+          "i": "e11",
+          "s": "n4",
+          "g": "n8",
+          "h": "r-th-rgi-paper"
+        },
+        {
+          "i": "e12",
+          "s": "n4",
+          "g": "n3",
+          "h": "r-th-rgi-ext"
+        },
+        {
+          "i": "e13",
+          "s": "n5",
+          "g": "n9",
+          "h": "r-th-rpt-paper"
+        },
+        {
+          "i": "e14",
+          "s": "n11",
+          "g": "n3",
+          "h": "r-th-prob-solve"
+        },
+        {
+          "i": "e15",
+          "s": "n12",
+          "g": "n13",
+          "h": "r-th-p2-t1"
+        },
+        {
+          "i": "e16",
+          "s": "n12",
+          "g": "n14",
+          "h": "r-th-p2-t2"
+        },
+        {
+          "i": "e17",
+          "s": "n12",
+          "g": "n15",
+          "h": "r-th-p2-t3"
+        },
+        {
+          "i": "e18",
+          "s": "n13",
+          "g": "n16",
+          "h": "r-th-nrc-paper"
+        },
+        {
+          "i": "e19",
+          "s": "n15",
+          "g": "n13",
+          "h": "r-th-nirc-imp"
+        },
+        {
+          "i": "e20",
+          "s": "n17",
+          "g": "n18",
+          "h": "r-th-p3-t1"
+        },
+        {
+          "i": "e21",
+          "s": "n17",
+          "g": "n19",
+          "h": "r-th-p3-t2"
+        },
+        {
+          "i": "e22",
+          "s": "n17",
+          "g": "n20",
+          "h": "r-th-p3-insight"
+        },
+        {
+          "i": "e23",
+          "s": "n17",
+          "g": "n22",
+          "h": "r-th-p3-prob"
+        },
+        {
+          "i": "e24",
+          "s": "n18",
+          "g": "n21",
+          "h": "r-th-rc-paper"
+        },
+        {
+          "i": "e25",
+          "s": "n22",
+          "g": "n17",
+          "h": "r-th-prob2-solve"
+        },
+        {
+          "i": "e26",
+          "s": "n23",
+          "g": "n24",
+          "h": "r-th-p4-t1"
+        },
+        {
+          "i": "e27",
+          "s": "n23",
+          "g": "n25",
+          "h": "r-th-p4-t2"
+        },
+        {
+          "i": "e28",
+          "s": "n23",
+          "g": "n26",
+          "h": "r-th-p4-t3"
+        },
+        {
+          "i": "e29",
+          "s": "n23",
+          "g": "n27",
+          "h": "r-th-p4-t4"
+        },
+        {
+          "i": "e30",
+          "s": "n28",
+          "g": "n24",
+          "h": "r-th-prob3-solve"
+        }
+      ]
+    },
+    {
+      "i": "canvas-impl",
+      "n": "Implementation",
+      "d": "What was actually built — completed features, attempted work, and current state",
+      "nt": [
+        {
+          "i": "t-done",
+          "n": "Completed",
+          "c": "#10B981"
+        },
+        {
+          "i": "t-partial",
+          "n": "Partial",
+          "c": "#F59E0B"
+        },
+        {
+          "i": "t-reverted",
+          "n": "Reverted",
+          "c": "#F43F5E"
+        },
+        {
+          "i": "t-platform",
+          "n": "Platform",
+          "c": "#3B82F6"
+        },
+        {
+          "i": "t-detail",
+          "n": "Detail",
+          "c": "#8B5CF6"
+        },
+        {
+          "i": "t-resource",
+          "n": "Resource",
+          "c": "#6366F1"
+        }
+      ],
+      "rt": {
+        "Completed": [
+          "includes",
+          "wired to"
+        ],
+        "Partial": [
+          "blocked by",
+          "depends on"
+        ],
+        "Reverted": [
+          "caused by"
+        ],
+        "Platform": [
+          "supports",
+          "provides"
+        ],
+        "Detail": [
+          "configures"
+        ]
+      },
+      "nodes": [
+        {
+          "i": "n1",
+          "p": [
+            0,
+            0
+          ],
+          "type": "ideaNode",
+          "t": "Platform",
+          "l": "Target Platforms",
+          "d": "Two viable Vulkan platforms for Minecraft Java Edition. The Radiance mod (recommended) completely replaces the OpenGL renderer with a Vulkan C++ backend, providing native hardware RT with DLSS/FSR/XeSS already integrated. Vulkanite adds Vulkan RT via OpenGL interop, used by Dirt RT. Both require VK_KHR_ray_tracing_pipeline.",
+          "sn": true,
+          "r": [
+            {
+              "i": "r-im-plat-r",
+              "n": "supports"
+            },
+            {
+              "i": "r-im-plat-v",
+              "n": "supports"
+            }
+          ]
+        },
+        {
+          "i": "n2",
+          "p": [
+            -330,
+            280
+          ],
+          "type": "ideaNode",
+          "t": "Platform",
+          "l": "Radiance Mod",
+          "d": "github.com/Minecraft-Radiance/Radiance — Full Vulkan C++ renderer replacement. Already integrates DLSS, FSR3, XeSS, and NRD. Supports Windows and Linux. Uses the MCVR submodule for the Vulkan renderer core. Build with CMake. The recommended platform because it gives full control over the rendering pipeline without OpenGL interop overhead.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n3",
+          "p": [
+            440,
+            50
+          ],
+          "type": "ideaNode",
+          "t": "Platform",
+          "l": "Vulkanite Mod",
+          "d": "github.com/MCRcortex/vulkanite — Adds Vulkan hardware RT to Minecraft via OpenGL-Vulkan interop. Shader packs (like Dirt RT) are distributed as resource packs with .rgen, .rchit, .rmiss shader files. Less control than Radiance but easier for shader pack distribution. Requires RTX-capable GPU.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n4",
+          "p": [
+            -600,
+            500
+          ],
+          "type": "ideaNode",
+          "t": "Completed",
+          "l": "SHaRC Echo Chamber",
+          "d": "Primary GI system. traceSecondary reads the SHaRC cache for indirect radiance, multi-bounce update pass populates it at 1/25 resolution. The 'echo chamber' pattern: cache reads from itself during path tracing, creating a self-reinforcing radiance field. Uses NVIDIA SHaRC API (not the standalone sharc_cache.glsl). Persistent across frames, accumulates over time.",
+          "sn": true,
+          "r": [
+            {
+              "i": "r-im-sharc-detail",
+              "n": "includes"
+            }
+          ]
+        },
+        {
+          "i": "n5",
+          "p": [
+            -200,
+            500
+          ],
+          "type": "ideaNode",
+          "t": "Completed",
+          "l": "ReSTIR DI",
+          "d": "Importance-sampled emissive block lighting. Wired into the FSR preset in Pipeline.java. Handles sampling of emissive blocks (torches, glowstone, lava, etc.) with reservoir-based spatiotemporal resampling for low-noise direct illumination from many light sources.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n6",
+          "p": [
+            200,
+            500
+          ],
+          "type": "ideaNode",
+          "t": "Completed",
+          "l": "NRD Tuning",
+          "d": "REBLUR denoiser for diffuse+specular with direct+indirect combined in prepare.comp before feeding to NRD. Tight temporal accumulation (30 frames), small spatial filter (15px radius), strict edge detection threshold (0.005). Tuned for stability with the echo chamber's gradual convergence.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-im-nrd-detail",
+              "n": "includes"
+            }
+          ]
+        },
+        {
+          "i": "n7",
+          "p": [
+            500,
+            500
+          ],
+          "type": "ideaNode",
+          "t": "Completed",
+          "l": "Release Build Fix",
+          "d": "Debug assertions in MCVR crashed the JVM when loaded via Radiance. Fixed by ensuring Release build configuration is used. Build must include both --target core AND --target shaders, plus .spv copy to resources.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n8",
+          "p": [
+            -600,
+            800
+          ],
+          "type": "ideaNode",
+          "t": "Completed",
+          "l": "Frame-Varying Atmospheric Dither",
+          "d": "Dither pattern in compose.comp varies per frame to break up banding artifacts in atmospheric/sky rendering. Prevents static noise patterns from being visible.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n9",
+          "p": [
+            -200,
+            800
+          ],
+          "type": "ideaNode",
+          "t": "Completed",
+          "l": "Debug Panel System",
+          "d": "Debug visualization panels in compose.comp for inspecting intermediate render targets. Allows viewing individual channels (diffuse, specular, direct, indirect, normals, etc.) to diagnose rendering issues.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n10",
+          "p": [
+            200,
+            800
+          ],
+          "type": "ideaNode",
+          "t": "Partial",
+          "l": "ReSTIR GI Proper",
+          "d": "Path-based ReSTIR GI with proper reservoir resampling of full light paths. Phase 1 (path state output images in world.rgen) and Phase 2 (path-based reservoir shader restir_gi.comp + A-Trous wavelet filter restir_gi_filter.comp) are built. Phase 3 (compose integration + pipeline rewire) is pending. The module exists (restir_gi_module.hpp/cpp) but is NOT wired into the active pipeline.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n11",
+          "p": [
+            500,
+            800
+          ],
+          "type": "ideaNode",
+          "t": "Reverted",
+          "l": "Block Invalidation",
+          "d": "Attempted SHaRC cache invalidation when blocks are placed/broken. Queue-based system with invalidation queue stub in ray_tracing_module.hpp/cpp. Reverted due to descriptor layout crashes — adding the invalidation queue buffer broke the existing descriptor set layout. Stub code remains but is inactive.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n12",
+          "p": [
+            -600,
+            1100
+          ],
+          "type": "ideaNode",
+          "t": "Detail",
+          "l": "SHaRC Config",
+          "d": "4M hash table entries (via NVIDIA API, not standalone sharc_cache.glsl). Normal-octant hashing for directional resolution. Trilinear interpolation for smooth cache lookups. RT path uses NVIDIA SHaRC API directly; the standalone shaders/sharc/sharc_cache.glsl with its own 4M table and normal-octant hash is a separate implementation that is NOT used by the RT path.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n13",
+          "p": [
+            200,
+            1100
+          ],
+          "type": "ideaNode",
+          "t": "Detail",
+          "l": "NRD Config Details",
+          "d": "prepare.comp combines direct+indirect before NRD input (not separated). compose.comp sets direct=0 since it was already combined in NRD. REBLUR mode (not ReLAX). 30-frame temporal accumulation, 15px spatial radius, 0.005 edge detection threshold.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n14",
+          "p": [
+            -200,
+            1100
+          ],
+          "type": "ideaNode",
+          "t": "Detail",
+          "l": "RT Output Images",
+          "d": "world.rgen outputs 18 images total. Includes SecondHitPath struct for path state. Path state output images exist (written by world.rgen) but are currently unused — they were added for the ReSTIR GI proper integration (Phase 1).",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n15",
+          "p": [
+            500,
+            1100
+          ],
+          "type": "ideaNode",
+          "t": "Resource",
+          "l": "Community Resources",
+          "d": "Graphics Programming Discord — active Radiance Cascades research channel with Alexander Sannikov himself participating. ShaderLabs Discord — Minecraft shader development community (#rethinking-voxels-gri573 channel). Shadertoy: shadertoy.com/view/X3XfRM — Sannikov's 3D RC demo. jason.today/rc — best interactive tutorial on RC fundamentals.",
+          "sn": false,
+          "r": []
+        }
+      ],
+      "edges": [
+        {
+          "i": "e1",
+          "s": "n1",
+          "g": "n2",
+          "h": "r-im-plat-r"
+        },
+        {
+          "i": "e2",
+          "s": "n1",
+          "g": "n3",
+          "h": "r-im-plat-v"
+        },
+        {
+          "i": "e3",
+          "s": "n4",
+          "g": "n12",
+          "h": "r-im-sharc-detail"
+        },
+        {
+          "i": "e4",
+          "s": "n6",
+          "g": "n13",
+          "h": "r-im-nrd-detail"
+        }
+      ]
+    },
+    {
+      "i": "canvas-pipeline",
+      "n": "Pipeline",
+      "d": "The actual current rendering pipeline — RT + SHaRC + ReSTIR DI + NRD + FSR + ToneMapping + PostRender",
+      "nt": [
+        {
+          "i": "t-stage",
+          "n": "Stage",
+          "c": "#3B82F6"
+        },
+        {
+          "i": "t-output",
+          "n": "Output",
+          "c": "#10B981"
+        },
+        {
+          "i": "t-config",
+          "n": "Config",
+          "c": "#F59E0B"
+        },
+        {
+          "i": "t-result",
+          "n": "Result",
+          "c": "#8B5CF6"
+        }
+      ],
+      "rt": {
+        "Stage": [
+          "produces",
+          "feeds into"
+        ],
+        "Output": [
+          "consumed by"
+        ],
+        "Config": [
+          "tunes"
+        ]
+      },
+      "nodes": [
+        {
+          "i": "n1",
+          "p": [
+            0,
+            0
+          ],
+          "type": "ideaNode",
+          "t": "Result",
+          "l": "Pipeline Overview",
+          "d": "The actual running pipeline as configured in Pipeline.java (FSR preset): RT (1-2 bounces query + multi-bounce SHaRC update at 1/25 res) + ReSTIR DI -> NRD (direct+indirect combined, REBLUR) -> FSR -> ToneMapping -> PostRender. Six stages from ray tracing through final output.",
+          "sn": true,
+          "r": [
+            {
+              "i": "r-pl-s1",
+              "n": "feeds into"
+            },
+            {
+              "i": "r-pl-s2",
+              "n": "feeds into"
+            }
+          ]
+        },
+        {
+          "i": "n2",
+          "p": [
+            -400,
+            300
+          ],
+          "type": "ideaNode",
+          "t": "Stage",
+          "l": "Stage 1: SHaRC Update",
+          "d": "Multi-bounce path tracing at 1/25 resolution to populate the persistent SHaRC radiance cache. Each update ray traces multiple bounces, accumulating radiance and writing it back into the hash table. The 'echo chamber' — cache reads from itself, so radiance propagates further each frame. This runs at very low resolution because it only needs to fill cache entries, not produce per-pixel results.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-pl-s1-next",
+              "n": "feeds into"
+            }
+          ]
+        },
+        {
+          "i": "n3",
+          "p": [
+            0,
+            300
+          ],
+          "type": "ideaNode",
+          "t": "Stage",
+          "l": "Stage 2: RT Query",
+          "d": "Primary ray tracing pass at full resolution. Traces 1-2 bounces per pixel. traceSecondary reads the SHaRC cache for indirect GI contribution at secondary hits. Specular reflections are passed through directly. Outputs diffuse+specular channels, normals, depth, motion vectors. world.rgen also outputs SecondHitPath struct data to path state images (currently unused, for future ReSTIR GI).",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-pl-s2-next",
+              "n": "feeds into"
+            }
+          ]
+        },
+        {
+          "i": "n4",
+          "p": [
+            400,
+            300
+          ],
+          "type": "ideaNode",
+          "t": "Stage",
+          "l": "Stage 3: ReSTIR DI",
+          "d": "Importance-sampled direct illumination from emissive blocks. Reservoir-based spatiotemporal resampling selects the most important light sources per pixel. Wired into the FSR preset pipeline. Adds emissive block lighting contribution to the direct illumination channel.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-pl-s3-next",
+              "n": "feeds into"
+            }
+          ]
+        },
+        {
+          "i": "n5",
+          "p": [
+            -400,
+            600
+          ],
+          "type": "ideaNode",
+          "t": "Stage",
+          "l": "Stage 4: NRD (REBLUR)",
+          "d": "REBLUR denoiser processes diffuse+specular. prepare.comp combines direct+indirect lighting before NRD input (they are NOT separated). Tight temporal accumulation (30 frames), small spatial filter (15px), strict edge detection (0.005). The combined input means NRD denoises everything together rather than having separate direct/indirect passes.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-pl-s4-next",
+              "n": "feeds into"
+            },
+            {
+              "i": "r-pl-s4-cfg",
+              "n": "produces"
+            }
+          ]
+        },
+        {
+          "i": "n6",
+          "p": [
+            0,
+            600
+          ],
+          "type": "ideaNode",
+          "t": "Stage",
+          "l": "Stage 5: FSR",
+          "d": "AMD FidelityFX Super Resolution for temporal upscaling and sharpening. Takes the denoised result and upscales to output resolution with temporal stability. Already integrated in the Radiance mod.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-pl-s5-next",
+              "n": "feeds into"
+            }
+          ]
+        },
+        {
+          "i": "n7",
+          "p": [
+            400,
+            600
+          ],
+          "type": "ideaNode",
+          "t": "Stage",
+          "l": "Stage 6: Tone Mapping + Post Render",
+          "d": "compose.comp applies tone mapping to the upscaled result. direct=0 in compose since direct+indirect were already combined in NRD prepare. Frame-varying atmospheric dither to prevent banding. Debug panel system for inspecting intermediate targets. Final output to screen.",
+          "sn": false,
+          "r": [
+            {
+              "i": "r-pl-s6-out",
+              "n": "produces"
+            }
+          ]
+        },
+        {
+          "i": "n8",
+          "p": [
+            400,
+            0
+          ],
+          "type": "ideaNode",
+          "t": "Config",
+          "l": "NRD Parameters",
+          "d": "REBLUR mode (not ReLAX). Temporal accumulation: 30 frames. Spatial filter radius: 15 pixels. Edge detection threshold: 0.005 (strict — preserves block edges). Direct+indirect combined in prepare.comp before NRD input. compose.comp zeroes direct contribution since it was already included.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n9",
+          "p": [
+            -400,
+            0
+          ],
+          "type": "ideaNode",
+          "t": "Config",
+          "l": "SHaRC Parameters",
+          "d": "4M hash table entries via NVIDIA SHaRC API. Normal-octant hashing for directional differentiation. Trilinear interpolation for smooth lookups. Update resolution: 1/25 of screen. Multi-bounce update populates cache. RT query reads cache at secondary hits.",
+          "sn": false,
+          "r": []
+        },
+        {
+          "i": "n10",
+          "p": [
+            200,
+            900
+          ],
+          "type": "ideaNode",
+          "t": "Result",
+          "l": "Final Frame",
+          "d": "The complete rendered frame. SHaRC echo chamber provides converging GI that improves over time. ReSTIR DI handles emissive block lighting. NRD REBLUR smooths remaining noise. FSR upscales with temporal stability. Tone mapping and atmospheric dither produce the final output.",
+          "sn": false,
+          "r": []
+        }
+      ],
+      "edges": [
+        {
+          "i": "e1",
+          "s": "n1",
+          "g": "n2",
+          "h": "r-pl-s1"
+        },
+        {
+          "i": "e2",
+          "s": "n1",
+          "g": "n3",
+          "h": "r-pl-s2"
+        },
+        {
+          "i": "e3",
+          "s": "n2",
+          "g": "n3",
+          "h": "r-pl-s1-next"
+        },
+        {
+          "i": "e4",
+          "s": "n3",
+          "g": "n4",
+          "h": "r-pl-s2-next"
+        },
+        {
+          "i": "e5",
+          "s": "n4",
+          "g": "n5",
+          "h": "r-pl-s3-next"
+        },
+        {
+          "i": "e6",
+          "s": "n5",
+          "g": "n6",
+          "h": "r-pl-s4-next"
+        },
+        {
+          "i": "e7",
+          "s": "n5",
+          "g": "n8",
+          "h": "r-pl-s4-cfg"
+        },
+        {
+          "i": "e8",
+          "s": "n6",
+          "g": "n7",
+          "h": "r-pl-s5-next"
+        },
+        {
+          "i": "e9",
+          "s": "n7",
+          "g": "n10",
+          "h": "r-pl-s6-out"
+        }
+      ]
+    },
+    {
+      "i": "canvas-files",
+      "n": "File Map",
+      "d": "Actual shader and module source files — what exists, what was modified, and current status",
+      "nt": [
+        { "i": "t-shader", "n": "Shader", "c": "#6366F1" },
+        { "i": "t-module", "n": "C++ Module", "c": "#3B82F6" },
+        { "i": "t-java", "n": "Java", "c": "#10B981" },
+        { "i": "t-standalone", "n": "Standalone", "c": "#F59E0B" },
+        { "i": "t-unwired", "n": "Built Not Wired", "c": "#F43F5E" }
+      ],
+      "rt": {
+        "Shader": ["used by", "reads from"],
+        "C++ Module": ["configures", "owns"],
+        "Java": ["orchestrates"],
+        "Standalone": ["independent of"],
+        "Built Not Wired": ["awaiting"]
+      },
+      "nodes": [
+        {
+          "i": "f1", "p": [0, 0], "type": "ideaNode", "t": "Shader",
+          "l": "world.rgen (modified)",
+          "d": "MCVR/src/shader/world/ray_tracing/internal/world.rgen — Main ray generation shader. Modified: echo chamber query pattern (traceSecondary reads SHaRC cache), SecondHitPath struct for path state output, 18 output images including path state images for future ReSTIR GI integration. The heart of the rendering — traces primary rays, queries SHaRC at secondary hits, outputs all G-buffer and lighting data.",
+          "sn": true, "r": []
+        },
+        {
+          "i": "f2", "p": [-500, 300], "type": "ideaNode", "t": "Shader",
+          "l": "default.rchit (unmodified)",
+          "d": "MCVR/src/shader/world/ray_tracing/internal/default.rchit — Closest-hit shader. Unmodified from upstream. Handles material evaluation at ray-surface intersections.",
+          "sn": false, "r": []
+        },
+        {
+          "i": "f3", "p": [-200, 300], "type": "ideaNode", "t": "Shader",
+          "l": "sharc_resolve.comp (unmodified)",
+          "d": "MCVR/src/shader/world/ray_tracing/internal/sharc_resolve.comp — SHaRC resolve compute shader. Unmodified from upstream. Handles SHaRC cache resolution/maintenance.",
+          "sn": false, "r": []
+        },
+        {
+          "i": "f4", "p": [200, 300], "type": "ideaNode", "t": "Shader",
+          "l": "prepare.comp (modified)",
+          "d": "MCVR/src/shader/world/nrd/prepare.comp — NRD input preparation. Modified: combines direct+indirect lighting together before feeding to NRD REBLUR, rather than keeping them separated. This means NRD denoises the combined signal.",
+          "sn": false, "r": []
+        },
+        {
+          "i": "f5", "p": [500, 300], "type": "ideaNode", "t": "Shader",
+          "l": "compose.comp (modified)",
+          "d": "MCVR/src/shader/world/nrd/compose.comp — Final composition shader. Modified: direct=0 since direct+indirect were already combined in NRD prepare. Debug panel system for inspecting intermediate render targets. Frame-varying atmospheric dither to prevent banding artifacts.",
+          "sn": false, "r": []
+        },
+        {
+          "i": "f6", "p": [-500, 600], "type": "ideaNode", "t": "Unwired",
+          "l": "restir_gi.comp (built, not wired)",
+          "d": "MCVR/src/shader/world/restir_gi/restir_gi.comp — Proper path-based ReSTIR GI shader. Built as part of Phase 2 of ReSTIR GI proper implementation. Uses reservoir resampling of full light paths for GI. Not wired into the active pipeline — awaiting Phase 3 (compose integration + pipeline rewire).",
+          "sn": false, "r": []
+        },
+        {
+          "i": "f7", "p": [-200, 600], "type": "ideaNode", "t": "Unwired",
+          "l": "restir_gi_filter.comp (built, not wired)",
+          "d": "MCVR/src/shader/world/restir_gi/restir_gi_filter.comp — A-Trous wavelet spatial filter for ReSTIR GI output. Built as part of Phase 2. Smooths the reservoir-resampled GI result. Not wired into the active pipeline.",
+          "sn": false, "r": []
+        },
+        {
+          "i": "f8", "p": [200, 600], "type": "ideaNode", "t": "Module",
+          "l": "ray_tracing_module.hpp/cpp (modified)",
+          "d": "MCVR/src/core/render/modules/world/ray_tracing/ray_tracing_module.hpp/cpp — Core RT module. Modified: 18 output images configuration, SHaRC config tuning (4M table, normal-octant hash, trilinear), invalidation queue stub (inactive — descriptor layout crashes prevented wiring).",
+          "sn": false, "r": []
+        },
+        {
+          "i": "f9", "p": [500, 600], "type": "ideaNode", "t": "Unwired",
+          "l": "restir_gi_module.hpp/cpp (built, not wired)",
+          "d": "MCVR/src/core/render/modules/world/restir_gi/restir_gi_module.hpp/cpp — Proper path-based ReSTIR GI C++ module. Built but not registered in the active pipeline. Awaiting Phase 3 integration.",
+          "sn": false, "r": []
+        },
+        {
+          "i": "f10", "p": [0, 900], "type": "ideaNode", "t": "Java",
+          "l": "Pipeline.java",
+          "d": "Radiance/src/main/java/com/radiance/client/pipeline/Pipeline.java — Pipeline orchestration. FSR preset configures the full chain: RT + SHaRC + ReSTIR DI + NRD + FSR + ToneMapping + PostRender. This is where the pipeline stages are wired together.",
+          "sn": false, "r": []
+        },
+        {
+          "i": "f11", "p": [-500, 900], "type": "ideaNode", "t": "Standalone",
+          "l": "sharc_cache.glsl (standalone, unused by RT)",
+          "d": "shaders/sharc/sharc_cache.glsl — Standalone SHaRC cache implementation with 4M hash table, normal-octant hashing, trilinear interpolation. This is a separate implementation that is NOT used by the RT path — the RT path uses the NVIDIA SHaRC API directly. Exists as reference/standalone code.",
+          "sn": false, "r": []
+        }
+      ],
+      "edges": []
+    }
+  ]
+}

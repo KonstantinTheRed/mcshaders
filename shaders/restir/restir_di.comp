@@ -1,0 +1,190 @@
+#version 460
+#extension GL_GOOGLE_include_directive : enable
+
+// ============================================================================
+// restir_di.comp — ReSTIR Direct Illumination
+//
+// Tier 1 implementation. Handles direct lighting from all emissive blocks.
+// Pipeline: initial candidates -> temporal reuse -> spatial reuse -> shadow ray.
+//
+// Per pixel:
+//   1. Sample 8 candidate lights from emissive block buffer (RIS)
+//   2. Merge with temporal reservoir from previous frame
+//   3. Merge with 3 spatial neighbor reservoirs
+//   4. Trace 1 shadow ray to the selected light
+//
+// Dispatch: (screenWidth/8, screenHeight/8, 1)
+// ============================================================================
+
+#include "reservoir.glsl"
+#include "../include/encoding.glsl"
+#include "../include/noise.glsl"
+#include "../include/block_data.glsl"
+#include "../include/voxel_dda.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// G-Buffer inputs
+layout(set = 3, binding = 0) uniform sampler2D gbufDepth;
+layout(set = 3, binding = 1) uniform sampler2D gbufNormal;
+layout(set = 3, binding = 3) uniform usampler2D gbufMaterial;
+layout(set = 3, binding = 4) uniform sampler2D gbufMotion;
+
+// Output: direct illumination
+layout(set = 3, binding = 5, rgba16f) uniform image2D outputDirectLight;
+
+// Number of initial light candidates to evaluate
+#define NUM_INITIAL_SAMPLES 8
+// Number of spatial neighbors to reuse from
+#define NUM_SPATIAL_SAMPLES 3
+// Maximum temporal reservoir age (prevents stale data)
+#define MAX_TEMPORAL_M 20.0
+// Spatial reuse search radius in pixels
+#define SPATIAL_RADIUS 16.0
+
+// Target PDF: unnormalized importance of a light for a given shading point
+float evalTargetPdf(vec3 worldPos, vec3 normal, uint lightIdx) {
+    if (lightIdx >= emissiveList.emissiveCount) return 0.0;
+
+    EmissiveBlock light = emissiveList.emissives[lightIdx];
+    vec3 toLight = light.posAndRadius.xyz - worldPos;
+    float dist2 = dot(toLight, toLight);
+    if (dist2 < EPSILON) return 0.0;
+
+    float dist = sqrt(dist2);
+    vec3 lightDir = toLight / dist;
+
+    // Geometric term: cosine at receiver * inverse square falloff
+    float cosTheta = max(dot(normal, lightDir), 0.0);
+    float falloff = 1.0 / dist2;
+
+    // Light power
+    float power = light.colorAndPower.a;
+
+    return cosTheta * falloff * power;
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 screenSize = frame.screenSize.xy;
+    if (any(greaterThanEqual(pixel, screenSize))) return;
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(screenSize);
+    uint pIdx = pixelIndex(pixel, screenSize);
+
+    // Read G-buffer
+    float depth = texture(gbufDepth, uv).r;
+    if (depth >= 1.0) {
+        imageStore(outputDirectLight, pixel, vec4(0.0));
+        return;
+    }
+
+    vec3 worldPos = worldPosFromDepth(depth, uv);
+    vec3 normal = octDecode(texture(gbufNormal, uv).rg);
+    uint matId = texture(gbufMaterial, uv).r;
+
+    RNG rng = rngInit(uvec2(pixel), uint(frame.frameCount));
+
+    // ---- Stage 1: Initial candidate sampling (RIS) ----
+    Reservoir reservoir = createReservoir();
+    uint numLights = emissiveList.emissiveCount;
+
+    if (numLights > 0u) {
+        for (int s = 0; s < NUM_INITIAL_SAMPLES; s++) {
+            // Uniform random light selection
+            uint lightIdx = uint(rngNext(rng) * float(numLights));
+            lightIdx = min(lightIdx, numLights - 1u);
+
+            float targetPdf = evalTargetPdf(worldPos, normal, lightIdx);
+            float sourcePdf = 1.0 / float(numLights); // uniform distribution
+
+            float weight = targetPdf / sourcePdf;
+            reservoirUpdate(reservoir, lightIdx, weight, targetPdf, rng);
+        }
+        reservoirFinalize(reservoir);
+    }
+
+    // ---- Stage 2: Temporal reuse ----
+    vec2 motion = texture(gbufMotion, uv).rg;
+    vec2 prevUV = uv - motion;
+
+    if (all(greaterThanEqual(prevUV, vec2(0.0))) &&
+        all(lessThan(prevUV, vec2(1.0)))) {
+        ivec2 prevPixel = ivec2(prevUV * vec2(screenSize));
+        uint prevIdx = pixelIndex(prevPixel, screenSize);
+
+        Reservoir temporal = unpackReservoir(reservoirPrevious.reservoirs[prevIdx]);
+
+        // Cap temporal M to prevent unbounded accumulation
+        temporal.M = min(temporal.M, MAX_TEMPORAL_M);
+
+        // Evaluate target PDF at current shading point
+        float targetAtCurrent = evalTargetPdf(worldPos, normal, temporal.lightIndex);
+
+        // Merge temporal into current
+        Reservoir combined = createReservoir();
+        reservoirMerge(combined, reservoir, reservoir.targetPdf, rng);
+        reservoirMerge(combined, temporal, targetAtCurrent, rng);
+        combined.M = reservoir.M + temporal.M;
+        reservoirFinalize(combined);
+
+        reservoir = combined;
+    }
+
+    // ---- Stage 3: Spatial reuse ----
+    for (int s = 0; s < NUM_SPATIAL_SAMPLES; s++) {
+        // Random neighbor within radius
+        vec2 offset = (rngNext2D(rng) * 2.0 - 1.0) * SPATIAL_RADIUS;
+        ivec2 neighborPixel = pixel + ivec2(offset);
+
+        // Bounds check
+        if (any(lessThan(neighborPixel, ivec2(0))) ||
+            any(greaterThanEqual(neighborPixel, screenSize))) continue;
+
+        // Reject neighbors with very different normals or depths
+        vec2 neighborUV = (vec2(neighborPixel) + 0.5) / vec2(screenSize);
+        float neighborDepth = texture(gbufDepth, neighborUV).r;
+        if (abs(neighborDepth - depth) > 0.05) continue;
+
+        vec3 neighborNormal = octDecode(texture(gbufNormal, neighborUV).rg);
+        if (dot(neighborNormal, normal) < 0.9) continue;
+
+        uint neighborIdx = pixelIndex(neighborPixel, screenSize);
+        Reservoir spatial = unpackReservoir(reservoirCurrent.reservoirs[neighborIdx]);
+
+        float targetAtCurrent = evalTargetPdf(worldPos, normal, spatial.lightIndex);
+        reservoirMerge(reservoir, spatial, targetAtCurrent, rng);
+    }
+    reservoirFinalize(reservoir);
+
+    // ---- Stage 4: Shadow ray to selected light ----
+    vec3 finalLight = vec3(0.0);
+
+    if (reservoir.lightIndex < numLights && reservoir.W > 0.0) {
+        EmissiveBlock selectedLight = emissiveList.emissives[reservoir.lightIndex];
+        vec3 lightPos = selectedLight.posAndRadius.xyz;
+        vec3 toLight = lightPos - worldPos;
+        float lightDist = length(toLight);
+        vec3 lightDir = toLight / lightDist;
+
+        // Offset origin along normal to avoid self-intersection
+        vec3 rayOrigin = worldPos + normal * 0.01;
+
+        // Trace shadow ray via DDA
+        bool occluded = traceVoxelShadowRay(rayOrigin, lightDir, lightDist - 0.02);
+
+        if (!occluded) {
+            // Unshadowed contribution
+            float cosTheta = max(dot(normal, lightDir), 0.0);
+            vec3 lightColor = selectedLight.colorAndPower.rgb;
+            float falloff = 1.0 / (lightDist * lightDist);
+
+            finalLight = lightColor * cosTheta * falloff * reservoir.W;
+        }
+    }
+
+    imageStore(outputDirectLight, pixel, vec4(finalLight, 1.0));
+
+    // Store reservoir for next frame's temporal reuse
+    reservoirCurrent.reservoirs[pIdx] = packReservoir(reservoir);
+}

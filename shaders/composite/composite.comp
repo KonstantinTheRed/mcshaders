@@ -1,0 +1,117 @@
+#version 460
+#extension GL_GOOGLE_include_directive : enable
+
+// ============================================================================
+// composite.comp — Final Frame Compositing
+//
+// Combines all lighting channels:
+//   final = direct_light + (diffuseGI * albedo) + denoised_specular
+//
+// Also applies:
+//   - Tone mapping (ACES fitted)
+//   - Exposure adaptation
+//   - Basic color grading
+//
+// Dispatch: (screenWidth/8, screenHeight/8, 1)
+// ============================================================================
+
+#include "../include/common.glsl"
+#include "../include/encoding.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Inputs from previous passes
+layout(set = 3, binding = 0)  uniform sampler2D gbufDepth;
+layout(set = 3, binding = 2)  uniform sampler2D gbufAlbedo;
+layout(set = 3, binding = 5)  uniform sampler2D directLight;
+layout(set = 3, binding = 6)  uniform sampler2D diffuseGI;        // from RC lookup
+layout(set = 3, binding = 7)  uniform sampler2D denoisedSpecular; // from ReLAX
+layout(set = 3, binding = 8)  uniform sampler2D skyTexture;
+
+// Output: final HDR color (before upscaling)
+layout(set = 3, binding = 9, rgba16f) uniform image2D outputHDR;
+
+// Compositing uniforms
+layout(set = 3, binding = 10) uniform CompositeUniforms {
+    float exposureValue;    // EV, auto-adapted
+    float whitePoint;       // max luminance for tone mapping
+    float saturation;       // color grading saturation multiplier
+    float contrast;         // color grading contrast
+    float sunShadowFactor;  // soft shadow from sun ray
+} composite;
+
+// ACES filmic tone mapping (fitted approximation by Krzysztof Narkowicz)
+vec3 acesToneMap(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// Simple auto-exposure based on average luminance
+float computeExposure(float avgLuminance) {
+    float keyValue = 0.18; // middle gray
+    float ev = composite.exposureValue;
+    return keyValue / max(avgLuminance, 0.001) * pow(2.0, ev);
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, frame.screenSize.xy))) return;
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(frame.screenSize.xy);
+
+    // Check for sky
+    float depth = texture(gbufDepth, uv).r;
+    if (depth >= 1.0) {
+        // Sky pixel — just output sky color
+        vec3 skyColor = texture(skyTexture, uv).rgb;
+        vec3 tonemapped = acesToneMap(skyColor * computeExposure(0.3));
+        imageStore(outputHDR, pixel, vec4(tonemapped, 1.0));
+        return;
+    }
+
+    // Read all lighting channels
+    vec3 albedo   = texture(gbufAlbedo, uv).rgb;
+    vec3 direct   = texture(directLight, uv).rgb;
+    vec3 diffuse  = texture(diffuseGI, uv).rgb;
+    vec3 specular = texture(denoisedSpecular, uv).rgb;
+
+    // ---- Composite lighting ----
+    // Diffuse: GI modulated by surface albedo
+    vec3 diffuseContrib = diffuse * albedo;
+
+    // Direct: already includes light color and shadow
+    vec3 directContrib = direct;
+
+    // Sun/moon direct contribution
+    vec3 sunDir = frame.sunDirection.xyz;
+    float sunIntensity = frame.sunDirection.w;
+    // (Sun shadow would come from a dedicated sun shadow pass)
+
+    // Combine all channels
+    vec3 hdrColor = directContrib + diffuseContrib + specular;
+
+    // ---- Exposure ----
+    float avgLum = luminance(hdrColor);
+    float exposure = computeExposure(0.18); // TODO: compute actual average
+    hdrColor *= exposure;
+
+    // ---- Color grading ----
+    // Saturation adjustment
+    float lum = luminance(hdrColor);
+    hdrColor = mix(vec3(lum), hdrColor, composite.saturation);
+
+    // Contrast adjustment around middle gray
+    hdrColor = mix(vec3(0.18), hdrColor, composite.contrast);
+    hdrColor = max(hdrColor, vec3(0.0));
+
+    // ---- Tone mapping ----
+    vec3 tonemapped = acesToneMap(hdrColor);
+
+    // ---- Output ----
+    // sRGB conversion will happen at swapchain present (VK_FORMAT_*_SRGB)
+    imageStore(outputHDR, pixel, vec4(tonemapped, 1.0));
+}
